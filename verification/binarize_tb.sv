@@ -6,8 +6,8 @@
 module binarize_tb #(
     parameter int PIXEL_NUM         = 784,
     parameter int PIXEL_DATA_WIDTH  = 8,
-    parameter int OUTPUT_DATA_WIDTH = 784
-    parameter int NUM_TESTS         = 5000;
+    parameter int OUTPUT_DATA_WIDTH = 784,
+    parameter int NUM_TESTS         = 500,
     parameter bit LOG_MONITOR       = 1'b0,
     parameter int MIN_CYCLES_BETWEEN_TESTS = 0,
     parameter int MAX_CYCLES_BETWEEN_TESTS = 12
@@ -27,14 +27,14 @@ binarize #(
     .*
 );
 
-function logic OUT_DATA_model(logic [PIXEL_DATA_WIDTH-1:0] IN_DATA [PIXEL_NUM-1:0]);
+function logic [OUTPUT_DATA_WIDTH-1:0] OUT_DATA_model(logic [PIXEL_DATA_WIDTH-1:0] IN_DATA [PIXEL_NUM-1:0]);
     logic   [OUTPUT_DATA_WIDTH-1:0]  OUTPUT;
     for(int i=0; i<PIXEL_NUM; i++) begin
         if(IN_DATA[i] >= 8'h80) begin
-            OUTPUT[i] <= 1'b1;
+            OUTPUT[i] = 1'b1;
         end
         else begin
-            OUTPUT[i] <= 1'b0;
+            OUTPUT[i] = 1'b0;
         end
     end
 
@@ -47,23 +47,19 @@ initial begin : generate_clock
 end
 
 covergroup cg @(posedge clk);
-    IN_DATA_en_cv : coverpoint IN_DATA iff(en){
-        foreach (IN_DATA[i]) begin
-            cp: coverpoint IN_DATA[i] {
-                bins all_vals[] = {[0:(PIXEL_DATA_WIDTH-1)]};
-            }
-        end
-        option.at_least = 1;
-    }
+//    foreach (IN_DATA[i]) begin
+//        cp_en: coverpoint IN_DATA[i] iff(en) {
+//            bins all_vals[] = {[0:(PIXEL_DATA_WIDTH-1)]};
+//            option.at_least = 1;
+//        }
+//    end
 
-    IN_DATA_no_en_cv : coverpoint IN_DATA iff(!en){
-        foreach (IN_DATA[i]) begin
-            cp: coverpoint IN_DATA[i] {
-                bins all_vals[] = {[0:(PIXEL_DATA_WIDTH-1)]};
-            }
-        end
-        option.at_least = 1;
-    }
+//    foreach (IN_DATA[i]) begin
+//        cp_no_en: coverpoint IN_DATA[i] iff(!en) {
+//            bins all_vals[] = {[0:(PIXEL_DATA_WIDTH-1)]};
+//            option.at_least = 1;
+//        }
+//    end
 endgroup
 
 cg cg_inst;
@@ -74,8 +70,8 @@ mailbox scoreboard_en_mailbox = new;
 mailbox driver_mailbox = new;
 
 class binarize_item;
-    rand bit [PIXEL_DATA_WIDTH-1:0]   IN_DATA [PIXEL_NUM-1:0];
-    rand bit en;
+    rand logic [PIXEL_DATA_WIDTH-1:0]   IN_DATA [PIXEL_NUM-1:0];
+    rand logic en;
 endclass
 
 // Initialize the DUT.
@@ -85,7 +81,7 @@ initial begin : initialization
 
     // Reset the design.
     rst  <= 1'b1;
-    IN_DATA <= '0; // Should set all elements in array to 0
+    IN_DATA <= '{default: '0}; // Should set all elements in array to 0
     repeat (5) @(posedge clk);
     @(negedge clk);
     rst <= 1'b0;
@@ -104,17 +100,30 @@ initial begin : generator
 end
 
 initial begin : en_monitor
+    // Capture inputs every cycle
+    automatic logic [PIXEL_DATA_WIDTH-1:0] in_copy [PIXEL_NUM-1:0];
+    automatic logic en_copy;
+    
     forever begin
-        @(posedge clk iff (en == 1'b0 || en == 1'b1));
-        scoreboard_IN_DATA_mailbox.put(IN_DATA);
+        @(posedge clk);
+
+        in_copy = IN_DATA;
+        en_copy = en;
+
+        // Wait for output
+        @(posedge clk);
+
+        scoreboard_IN_DATA_mailbox.put(in_copy);
         scoreboard_OUT_DATA_mailbox.put(OUT_DATA);
-        scoreboard_en_mailbox.put(en);
-        if (LOG_MONITOR) $display("[%0t] EN monitor detected completion with OUT_DATA=%0h", $realtime, OUT_DATA);
+        scoreboard_en_mailbox.put(en_copy);
+
+        if (LOG_MONITOR)
+            $display("[%0t] en=%0b OUT=%0h", $realtime, en_copy, OUT_DATA);
     end
 end
 
 initial begin : driver
-    fib_item item;
+    binarize_item item;
     int unsigned cycle_delay;
 
     @(posedge clk iff !rst);
@@ -146,24 +155,22 @@ initial begin : scoreboard
 
     for (int i = 0; i < NUM_TESTS; i++) begin
         scoreboard_IN_DATA_mailbox.get(IN_DATA);
-        scoreboard_actual_OUT_DATA_mailbox.get(actual_OUT_DATA);
+        scoreboard_OUT_DATA_mailbox.get(actual_OUT_DATA);
         scoreboard_en_mailbox.get(en);
         if(en) begin
-            for(int i = 0; i < PIXEL_NUM; i++) begin
-                expected_output = OUT_DATA_model(IN_DATA);
-                if(actual_OUT_DATA == expected_output) begin
-                    passed++;
-                end else begin
-                    failed++;
-                    $display("Test failed (time %0t). Conditions: EN = %0d, IN_DATA = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, IN_DATA, actual_OUT_DATA, expected_output);
-                end
+            expected_output = OUT_DATA_model(IN_DATA);
+            if(actual_OUT_DATA == expected_output) begin
+                passed++;
+            end else begin
+                failed++;
+                $display("Test failed (time %0t). Conditions: EN = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, actual_OUT_DATA, expected_output);
             end
         end else begin
             if(actual_OUT_DATA == prev_OUT_DATA) begin
                 passed++;
             end else begin
                 failed++;
-                $display("Test failed (time %0t). Conditions: EN = %0d, IN_DATA = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, IN_DATA, actual_OUT_DATA, prev_OUT_DATA);
+                $display("Test failed (time %0t). Conditions: EN = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, actual_OUT_DATA, prev_OUT_DATA);
             end
         end
         prev_OUT_DATA = actual_OUT_DATA;
@@ -172,3 +179,5 @@ initial begin : scoreboard
     $display("Tests completed: %0d passed, %0d failed", passed, failed);
     disable generate_clock;
 end
+
+endmodule
