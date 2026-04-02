@@ -27,6 +27,20 @@ binarize #(
     .*
 );
 
+function logic OUT_DATA_model(logic [PIXEL_DATA_WIDTH-1:0] IN_DATA [PIXEL_NUM-1:0]);
+    logic   [OUTPUT_DATA_WIDTH-1:0]  OUTPUT;
+    for(int i=0; i<PIXEL_NUM; i++) begin
+        if(IN_DATA[i] >= 8'h80) begin
+            OUTPUT[i] <= 1'b1;
+        end
+        else begin
+            OUTPUT[i] <= 1'b0;
+        end
+    end
+
+    return OUTPUT;
+endfunction
+
 initial begin : generate_clock
     clk <= 1'b0;
     forever #5 clk <= ~clk;
@@ -56,10 +70,12 @@ cg cg_inst;
 
 mailbox scoreboard_IN_DATA_mailbox = new;
 mailbox scoreboard_OUT_DATA_mailbox = new;
+mailbox scoreboard_en_mailbox = new;
 mailbox driver_mailbox = new;
 
 class binarize_item;
     rand bit [PIXEL_DATA_WIDTH-1:0]   IN_DATA [PIXEL_NUM-1:0];
+    rand bit en;
 endclass
 
 // Initialize the DUT.
@@ -89,10 +105,10 @@ end
 
 initial begin : en_monitor
     forever begin
-        @(posedge clk iff (en == 1'b0));
-        @(posedge clk iff (en == 1'b1));
+        @(posedge clk iff (en == 1'b0 || en == 1'b1));
         scoreboard_IN_DATA_mailbox.put(IN_DATA);
         scoreboard_OUT_DATA_mailbox.put(OUT_DATA);
+        scoreboard_en_mailbox.put(en);
         if (LOG_MONITOR) $display("[%0t] EN monitor detected completion with OUT_DATA=%0h", $realtime, OUT_DATA);
     end
 end
@@ -108,7 +124,7 @@ initial begin : driver
 
         // Drive the test onto the DUT.
         IN_DATA <= item.IN_DATA;
-        en <= $urandom;
+        en <= item.en;
         @(posedge clk);
 
         // Wait a random amount of time in between tests.
@@ -120,29 +136,37 @@ end
 // Verify the results.
 initial begin : scoreboard
     logic [PIXEL_DATA_WIDTH-1:0] IN_DATA [PIXEL_NUM-1:0];
-    logic [OUTPUT_DATA_WIDTH-1:0]  actual_OUT_DATA, expected_OUT_DATA;
+    logic [OUTPUT_DATA_WIDTH-1:0]  actual_OUT_DATA, prev_OUT_DATA, expected_output;
+    logic en;
 
+    // Reset values
     passed = 0;
     failed = 0;
+    prev_OUT_DATA = '0;
 
     for (int i = 0; i < NUM_TESTS; i++) begin
-        scoreboard_n_mailbox.get(n);
-        scoreboard_result_mailbox.get(actual);
-        scoreboard_overflow_mailbox.get(actual_overflow);
-
-        expected = result_model(n);
-        expected_overflow = overflow_model(expected);
-        truncated_expected = expected;
-        if (actual == truncated_expected && expected_overflow == actual_overflow) begin
-            $display("Test passed (time %0t) for input = %0d", $time, n);
-            passed++;
-        end else if(actual != expected) begin
-            $display("Test failed (time %0t): result = %0d instead of %0d for input = %0d.", $time, actual, truncated_expected, n);
-            failed++;
-        end else if(expected_overflow != actual_overflow) begin
-            $display("Test failed (time %0t): overflow = %0d instead of %0d for input = %0d.", $time, actual_overflow, expected_overflow, n);
-            failed++;
+        scoreboard_IN_DATA_mailbox.get(IN_DATA);
+        scoreboard_actual_OUT_DATA_mailbox.get(actual_OUT_DATA);
+        scoreboard_en_mailbox.get(en);
+        if(en) begin
+            for(int i = 0; i < PIXEL_NUM; i++) begin
+                expected_output = OUT_DATA_model(IN_DATA);
+                if(actual_OUT_DATA == expected_output) begin
+                    passed++;
+                end else begin
+                    failed++;
+                    $display("Test failed (time %0t). Conditions: EN = %0d, IN_DATA = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, IN_DATA, actual_OUT_DATA, expected_output);
+                end
+            end
+        end else begin
+            if(actual_OUT_DATA == prev_OUT_DATA) begin
+                passed++;
+            end else begin
+                failed++;
+                $display("Test failed (time %0t). Conditions: EN = %0d, IN_DATA = %0d, DUT OUT_DATA = %0d, Expected OUT_DATA = %0d.", $time, en, IN_DATA, actual_OUT_DATA, prev_OUT_DATA);
+            end
         end
+        prev_OUT_DATA = actual_OUT_DATA;
     end
 
     $display("Tests completed: %0d passed, %0d failed", passed, failed);
