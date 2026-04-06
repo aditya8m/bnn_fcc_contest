@@ -199,8 +199,8 @@
 
 module tb_neuron();
 
-parameter PW = 4;             
-parameter TOTAL_BITS = 120;    
+parameter PW = 64;             
+parameter TOTAL_BITS = 64;    
 parameter TOTAL_CYCLES = TOTAL_BITS / PW; 
 
 logic clk, rst, valid_in, last, valid_out, y;
@@ -219,17 +219,17 @@ always #5 clk = ~clk;
 initial begin
     rst = 1;
     valid_in = 0; last = 0; in = 0; weights = 0;
-    threshold = 784; // Small threshold to ensure Y triggers
+    threshold = 64; // Small threshold to ensure Y triggers
     #20 rst = 0;
     @(posedge clk);
 
     // --- NEURON 1: ALL MATCHES ---
-    // Goal: Popcount should be exactly 784
+    // Goal: Popcount should be exactly 64
     $display("\n[STIMULUS] Starting Neuron 1: Expecting Popcount 784");
     for (int i = 0; i < TOTAL_CYCLES; i++) begin
         valid_in = 1;
-        in       = 4'hF; 
-        weights  = 4'hF; // 1 XNOR 1 = 1 (8 matches per cycle)
+        in       = 64'hFFFFFFFFFFFFFFFF; 
+        weights  = 64'hFFFFFFFFFFFFFFFF; // 1 XNOR 1 = 1 (8 matches per cycle)
         last     = (i == TOTAL_CYCLES - 1);
         @(posedge clk);
     end

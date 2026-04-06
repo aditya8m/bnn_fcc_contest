@@ -10,7 +10,7 @@ module neuron_processor #(
     input logic rst,
     input logic [INPUT_WIDTH-1:0] in,
     input logic [INPUT_WIDTH-1:0] weights,
-    input logic [$clog2(NEURON_COUNT + 1)-1:0] threshold,
+    input logic [31:0] threshold,
 
     input logic valid_in,
     input logic last,
@@ -19,11 +19,10 @@ module neuron_processor #(
     output logic valid_out,
     output logic y 
 );
-    localparam int beat_count = 8/INPUT_WIDTH - 1;
 
     logic [INPUT_WIDTH-1:0] xnor_r;
     logic [$clog2(NEURON_COUNT + 1)-1:0] popcount_r, stored_popcount_r, adder_wire;
-    logic [$clog2(NEURON_COUNT + 1)-1:0] threshold1_r, threshold2_r;
+    logic [31:0] threshold1_r, threshold2_r;
     
     logic last1_r, last2_r, last3_r;
 
@@ -40,9 +39,9 @@ module neuron_processor #(
             y_r               <= 0;
         end else begin
         //stage 1
-            if (valid_in) xnor_r <= in ~^ weights;
-            last1_r              <= last;
-            threshold1_r         <= threshold;
+            if (valid_in) xnor_r                <= in ~^ weights;
+            if (valid_in) last1_r               <= last;
+            if (valid_in) threshold1_r          <= threshold;
 
             //stage 2
             popcount_r       <= $countones(xnor_r);
